@@ -1,0 +1,1579 @@
+---
+params:
+  output_path: NA
+---
+
+<style type="text/css">
+
+p{font-family: IDLC;
+font-size: 10.5 px;}
+
+</style>
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
+#abcdeffszq12sss5ssss3265s4345564978990999898198121
+```
+
+```{r}
+
+library(odbc)
+library(DBI)
+library(tidyverse)
+library(dplyr)
+library(openxlsx2)
+library(gt)
+library(lubridate)
+library(bizdays)
+library(janitor)
+
+con <- dbConnect(odbc::odbc(),
+               Driver   = "*****",
+                 Server   = "*****",
+                 Database = "*****",
+                 UID = "*****",
+                 PWD = "*****",
+                 Port = *****)
+
+Validation  <- tbl(con, DBI::Id(schema = "SME", table = "Holiday")) %>% collect()
+BD_Calender <- create.calendar(name = "BD", holidays = Validation$Date, weekdays = c("friday", "saturday"))
+
+last_working_day  <- as.Date(bizdays::add.bizdays(Sys.Date(), -1, "BD"))
+prior_working_day <- as.Date(bizdays::add.bizdays(Sys.Date(), -2, "BD"))
+window_start_day  <- as.Date(last_working_day - months(3))
+
+window_start <- paste0(window_start_day)
+window_end   <- paste0(last_working_day)
+yday         <- as.character(last_working_day)
+
+output_dir     <- "~/Report/Daily/Projection Report"
+output_file    <- file.path(output_dir, paste0("Projection_for_", last_working_day, ".xlsx"))
+yesterday_file <- file.path(output_dir, paste0("Projection_for_", prior_working_day, ".xlsx"))
+
+```
+
+
+```{r}
+
+#Branch -> RCM / CM mapping
+
+branch_mapping <- tibble::tribble(
+  ~Branch,                    ~RCM,                       ~CM,
+  "Bogra",                    "Md. Kamal Uddin",          "Md. Kamal Uddin",
+  "Dinajpur",                 "Md. Kamal Uddin",          "Md. Ziaur Rahman",
+  "Kushtia",                  "Md. Kamal Uddin",          "Md. Mehedi Hasan",
+  "Naogaon (Bogra)",          "Md. Kamal Uddin",          "Md. Kamal Uddin",
+  "Natore",                   "Md. Kamal Uddin",          "Md. Mehedi Hasan",
+  "Pabna (Natore)",           "Md. Kamal Uddin",          "Md. Mehedi Hasan",
+  "Rajshahi",                 "Md. Kamal Uddin",          "Md. Mehedi Hasan",
+  "Rangpur",                  "Md. Kamal Uddin",          "Md. Ziaur Rahman",
+  "Barisal",                  "Tito Proshanta Rozario",   "Tito Proshanta Rozario",
+  "Bhola (Barisal)",          "Tito Proshanta Rozario",   "Tito Proshanta Rozario",
+  "Bhulta",                   "Tito Proshanta Rozario",   "Mahir Tazwer",
+  "Elephant Road",            "Tito Proshanta Rozario",   "Mahir Tazwer",
+  "Faridpur",                 "Tito Proshanta Rozario",   "Tito Proshanta Rozario",
+  "Gulshan",                  "Tito Proshanta Rozario",   "Mahir Tazwer",
+  "Jessore",                  "Tito Proshanta Rozario",   "Mohammad Shahadat Hossain",
+  "Khulna",                   "Tito Proshanta Rozario",   "Mohammad Shahadat Hossain",
+  "Mirpur",                   "Tito Proshanta Rozario",   "Md. Rakibul Alam",
+  "Narsingdi",                "Tito Proshanta Rozario",   "Mahir Tazwer",
+  "Savar",                    "Tito Proshanta Rozario",   "Md. Rakibul Alam",
+  "Shatkhira (Jessore)",      "Tito Proshanta Rozario",   "Mohammad Shahadat Hossain",
+  "Dilkusha",                 "S.M. Farabi Ferdous",      "Koushik Mohammad",
+  "Gazipur",                  "S.M. Farabi Ferdous",      "Md. Rakibul Alam",
+  "Imamganj",                 "S.M. Farabi Ferdous",      "Arman Ahmed",
+  "Keranigonj",               "S.M. Farabi Ferdous",      "Arman Ahmed",
+  "Mymensingh",               "S.M. Farabi Ferdous",      "Koushik Mohammad",
+  "Narayangonj",              "S.M. Farabi Ferdous",      "Koushik Mohammad",
+  "Sherpur (Mymensingh)",     "S.M. Farabi Ferdous",      "Koushik Mohammad",
+  "Tangail (Gazipur)",        "S.M. Farabi Ferdous",      "Md. Rakibul Alam",
+  "Tongi",                    "S.M. Farabi Ferdous",      "Koushik Mohammad",
+  "Agrabad",                  "Mohammad Foysal Hasan",    "Mohammad Foysal Hasan",
+  "Brahmanbaria (Comilla)",   "Mohammad Foysal Hasan",    "Mohammad Foysal Hasan",
+  "Chowmuhani",               "Mohammad Foysal Hasan",    "Mohammad Foysal Hasan",
+  "Comilla",                  "Mohammad Foysal Hasan",    "Mohammad Foysal Hasan",
+  "Feni (Chowmuhani)",        "Mohammad Foysal Hasan",    "Mohammad Foysal Hasan",
+  "Hobiganj",                 "Mohammad Foysal Hasan",    "Md. Raisul Azad",
+  "Nandankanon",              "Mohammad Foysal Hasan",    "Mohammad Foysal Hasan",
+  "Sylhet",                   "Mohammad Foysal Hasan",    "Md. Raisul Azad"
+)
+
+#RCM full name -> short nickname, used to label the RCM column in the dashboard
+rcm_nickname_map <- c(
+  "Md. Kamal Uddin"        = "KUddin",
+  "Tito Proshanta Rozario" = "Tito",
+  "S.M. Farabi Ferdous"    = "Ferdous",
+  "Mohammad Foysal Hasan"  = "Foysal"
+)
+
+#CM full name -> short nickname/userid, used to label the CM column in the RCM/CM-wise
+#Yesterday's Projection table. RCMs who are also self-CM for some branches (Md. Kamal
+#Uddin, Tito Proshanta Rozario, Mohammad Foysal Hasan) reuse their RCM nickname here.
+cm_nickname_map <- c(
+  "Md. Kamal Uddin"           = "KUddin",
+  "Md. Ziaur Rahman"          = "MZiaur",
+  "Md. Mehedi Hasan"          = "mhmehedi",
+  "Tito Proshanta Rozario"    = "Tito",
+  "Mahir Tazwer"               = "mahir",
+  "Mohammad Shahadat Hossain" = "moshahadat",
+  "Md. Rakibul Alam"          = "ralam",
+  "Koushik Mohammad"          = "koushik",
+  "Arman Ahmed"                = "arman",
+  "Mohammad Foysal Hasan"     = "Foysal",
+  "Md. Raisul Azad"           = "raisul",
+  "Md Kamrul Islam"           = "kislam",
+  "Mohammed Omar Faruque"     = "omarf"
+)
+
+#RCM display order -- order of first appearance in branch_mapping
+rcm_order <- unique(branch_mapping$RCM)
+
+#Branch -> HoRB mapping, sourced from sme.RBH. Joined into every lead-wise detail tab
+#(added after the STM column) -- not used in the summary/dashboard tables.
+HoRB_mapping <- dbGetQuery(con, "SELECT Branch, RBH AS HoRB FROM sme.RBH")
+
+excluded_branches     <- c("Uttara", "Dhanmondi")
+excluded_branches_sql <- paste0("'", excluded_branches, "'", collapse = ", ")
+
+excluded_rejection_reasons <- c(
+ 
+  "From credit end: Sufficient Documents not submitted as per the STP policy.",
+  "Rejected Due to Delayed Negotiation"
+)
+
+
+
+excluded_rejection_sql <- paste0("'", excluded_rejection_reasons, "'", collapse = ", ")
+
+#STP definition -- now sourced from dbo.AnalyticsOCASV2, matched to dbo.AnalyticsOCAS by
+#LeadReferenceNo. FileCategory in AnalyticsOCASV2 ('STP' / otherwise) is used directly.
+#A lead with no match in AnalyticsOCASV2 is left out entirely (INNER JOIN), so it never
+#appears in any of the pulls below.
+stp_join_sql <- "INNER JOIN dbo.AnalyticsOCASV2 ON dbo.AnalyticsOCAS.LeadReferenceNo = dbo.AnalyticsOCASV2.LeadReferenceNo"
+
+#If FileCategory in AnalyticsOCASV2 is blank/NULL for a matched lead, treat it as Non-STP
+#(rather than dropping it -- only a missing LeadReferenceNo match drops the lead, via the
+#INNER JOIN above).
+file_category_sql <- "CASE WHEN dbo.AnalyticsOCASV2.FileCategory = 'STP' THEN 'STP' ELSE 'Non-STP' END"
+
+```
+
+```{r}
+
+#To Be Visited
+#NOTE: window is now anchored to Lead_Approver_Date (lead creation date), same 3-month
+#trailing window used everywhere else, matching Script 2's approach. Prospect_Approve_Date_Latest
+#is no longer date-range filtered -- it is only checked for non-null (the lead has reached
+#this stage), so a lead created within the window still shows up here regardless of how
+#recent/old its own stage date is.
+
+to_be_visited_leads <- dbGetQuery(con,paste0("SELECT Branch,dbo.AnalyticsOCAS.LeadReferenceNo LeadReferenceNo,ProspectName,Interested_Amount_To,Interested_Amount_To/1E6 Interested_Amount_To_Mln,
+[Business Type],CRG_Applicability,Product_Category,LOWER(Analyst_Name) Analyst_Name,[Credit Analyst] as Credit_Analyst,RM_Name,STM_Name, 
+CAST(Lead_Approver_Date AS DATE) Lead_Approver_Date,
+CAST(Prospect_Approve_Date_Latest AS DATE) Prospect_Approve_Date_Latest,
+", file_category_sql, " File_Category
+FROM dbo.AnalyticsOCAS
+", stp_join_sql, "
+WHERE Branch NOT IN (", excluded_branches_sql, ")
+AND Product_Category = 'SME'
+AND Lead_Approver_Date BETWEEN '", window_start, "' AND '", window_end, "'
+AND Prospect_Approve_Date_Latest IS NOT NULL
+AND CRM_Visit_Date IS NULL
+AND Analyst_Pending_Collection_Date_Latest IS NULL
+AND Analyst_Pending_Declaration_date_Latest IS NULL
+AND Sanction_Date_Initial IS NULL
+AND (Reject_Date IS NULL OR Reject_Date = '1900-01-01')")) |>
+ mutate(
+    Credit_Analyst = ifelse(is.na(Credit_Analyst) | trimws(Credit_Analyst) == "","Unassigned", Credit_Analyst),
+    File_Category = ifelse(is.na(File_Category) | trimws(File_Category) == "","Non-STP", File_Category)) |>
+  left_join(branch_mapping, by = "Branch") |>
+  left_join(HoRB_mapping, by = "Branch")
+
+to_be_visited_summary <- to_be_visited_leads |>
+  group_by(Branch) |>
+  summarise(`To Be Visited Number` = n(), `To Be Visited Amount` = sum(Interested_Amount_To_Mln)) |>
+  as.data.frame() |>
+  left_join(branch_mapping, by = "Branch")
+
+#Lead-wise detail -- exact column naming/order requested for the "To Be Visited" tab
+to_be_visited_detail <- to_be_visited_leads |>
+  transmute(
+    `Lead Reference No` = LeadReferenceNo,
+    Branch,
+    Client               = ProspectName,
+    `Proposed Amount`    = Interested_Amount_To,
+    `File Category`      = File_Category,
+    `CRG `       = CRG_Applicability,
+    `Lead Creation Date` = Lead_Approver_Date,
+    `Prospect Completion Date`    = Prospect_Approve_Date_Latest,
+    Analyst              = Credit_Analyst,
+    CM,
+    RCM,
+    RM                   = RM_Name,
+    STM                  = STM_Name,
+    HoRB
+  )
+
+```
+
+```{r}
+
+#Pending To Be Declared
+#Window anchored to Lead_Approver_Date; CRM_Visit_Date only checked for non-null.
+
+pending_to_be_declared_leads <- dbGetQuery(con,paste0("SELECT Branch,dbo.AnalyticsOCAS.LeadReferenceNo LeadReferenceNo,ProspectName,Interested_Amount_To,Interested_Amount_To/1E6 Interested_Amount_To_Mln,
+[Business Type],CRG_Applicability,LOWER(Analyst_Name) Analyst_Name,[Credit Analyst] as Credit_Analyst,RM_Name,STM_Name,
+CAST(Lead_Approver_Date AS DATE) Lead_Approver_Date,
+CAST(Prospect_Approve_Date_Latest AS DATE) Prospect_Approve_Date_Latest,
+CAST(CRM_Visit_Date AS DATE) CRM_Visit_Date,
+", file_category_sql, " File_Category
+FROM dbo.AnalyticsOCAS
+", stp_join_sql, "
+WHERE Branch NOT IN (", excluded_branches_sql, ")
+AND Product_Category = 'SME'
+AND ", file_category_sql, " = 'Non-STP'
+AND Lead_Approver_Date BETWEEN '", window_start, "' AND '", window_end, "'
+AND Prospect_Approve_Date_Latest IS NOT NULL
+AND CRM_Visit_Date IS NOT NULL
+AND Analyst_Pending_Collection_Date_Latest IS NULL
+AND Analyst_Pending_Declaration_date_Latest IS NULL
+AND Sanction_Date_Initial IS NULL
+AND (Reject_Date IS NULL OR Reject_Date = '1900-01-01')")) |>
+ mutate(
+    Credit_Analyst = ifelse(is.na(Credit_Analyst) | trimws(Credit_Analyst) == "","Unassigned", Credit_Analyst),
+    File_Category = ifelse(is.na(File_Category) | trimws(File_Category) == "","Non-STP", File_Category)) |>
+  left_join(branch_mapping, by = "Branch") |>
+  left_join(HoRB_mapping, by = "Branch")
+
+pending_to_be_declared_summary <- pending_to_be_declared_leads |>
+  group_by(Branch) |>
+  summarise(`Pending To Be Declared Number` = n(), `Pending To Be Declared Amount` = sum(Interested_Amount_To_Mln)) |>
+  as.data.frame() |>
+  left_join(branch_mapping, by = "Branch")
+
+#Lead-wise detail -- exact column naming/order requested for the "Pending To Be Declared" tab
+pending_to_be_declared_detail <- pending_to_be_declared_leads |>
+  transmute(
+    `Lead Reference No` = LeadReferenceNo,
+    Branch,
+    Client               = ProspectName,
+    `Proposed Amount`    = Interested_Amount_To,
+    `File Category`      = File_Category,
+    `CRG `       = CRG_Applicability,
+    `Lead Creation Date` = Lead_Approver_Date,
+    `Prospect Completion Date`    = Prospect_Approve_Date_Latest,
+    `Analyst Visit Date` = CRM_Visit_Date,
+    Analyst              = Credit_Analyst,
+    CM,
+    RCM,
+    RM                   = RM_Name,
+    STM                  = STM_Name,
+    HoRB
+  )
+
+```
+
+```{r}
+
+#Decision To Be Made -- STP leads pulled separately, then Non-STP leads, then stacked with rbind
+#(same pattern as the analyst script's Approved + Reopen pull)
+#Window anchored to Lead_Approver_Date; every intermediate stage date is only checked for non-null.
+
+decision_stp_leads <- dbGetQuery(con,paste0("SELECT Branch,dbo.AnalyticsOCAS.LeadReferenceNo LeadReferenceNo,ProspectName,Interested_Amount_To,Interested_Amount_To/1E6 Interested_Amount_To_Mln,
+[Business Type],CRG_Applicability,LOWER(Analyst_Name) Analyst_Name,[Credit Analyst] as Credit_Analyst,RM_Name,STM_Name,
+CAST(Lead_Approver_Date AS DATE) Lead_Approver_Date,
+CAST(Prospect_Approve_Date_Latest AS DATE) Prospect_Approve_Date_Latest,
+CAST(CRM_Visit_Date AS DATE) CRM_Visit_Date,
+CAST(Analyst_Pending_Declaration_date_Latest AS DATE) Analyst_Pending_Declaration_date_Latest,
+CAST(Analyst_Pending_Collection_Date_Latest AS DATE) Analyst_Pending_Collection_Date_Latest,
+dbo.AnalyticsOCASV2.RequestDelayReason RequestDelayReason,
+dbo.AnalyticsOCASV2.AnalystRemark AnalystRemark
+FROM dbo.AnalyticsOCAS
+", stp_join_sql, "
+WHERE Branch NOT IN (", excluded_branches_sql, ")
+AND Product_Category = 'SME'
+AND ", file_category_sql, " = 'STP'
+AND Lead_Approver_Date BETWEEN '", window_start, "' AND '", window_end, "'
+AND Prospect_Approve_Date_Latest IS NOT NULL
+AND CRM_Visit_Date IS NOT NULL
+AND Sanction_Date_Initial IS NULL
+AND (Reject_Date IS NULL OR Reject_Date = '1900-01-01')")) |>
+  mutate(File_Category  = "STP",
+         
+         Credit_Analyst = ifelse(is.na(Credit_Analyst) | trimws(Credit_Analyst) == "","Unassigned", Credit_Analyst))
+
+decision_non_stp_leads <- dbGetQuery(con,paste0("SELECT Branch,dbo.AnalyticsOCAS.LeadReferenceNo LeadReferenceNo,ProspectName,Interested_Amount_To,Interested_Amount_To/1E6 Interested_Amount_To_Mln,
+[Business Type],CRG_Applicability,LOWER(Analyst_Name) Analyst_Name,[Credit Analyst] as Credit_Analyst,RM_Name,STM_Name,
+CAST(Lead_Approver_Date AS DATE) Lead_Approver_Date,
+CAST(Prospect_Approve_Date_Latest AS DATE) Prospect_Approve_Date_Latest,
+CAST(CRM_Visit_Date AS DATE) CRM_Visit_Date,
+CAST(Analyst_Pending_Declaration_date_Latest AS DATE) Analyst_Pending_Declaration_date_Latest,
+CAST(Analyst_Pending_Collection_Date_Latest AS DATE) Analyst_Pending_Collection_Date_Latest,
+dbo.AnalyticsOCASV2.RequestDelayReason RequestDelayReason,
+dbo.AnalyticsOCASV2.AnalystRemark AnalystRemark
+FROM dbo.AnalyticsOCAS
+", stp_join_sql, "
+WHERE Branch NOT IN (", excluded_branches_sql, ")
+AND Product_Category = 'SME'
+AND ", file_category_sql, " = 'Non-STP'
+AND Lead_Approver_Date BETWEEN '", window_start, "' AND '", window_end, "'
+AND Prospect_Approve_Date_Latest IS NOT NULL
+AND CRM_Visit_Date IS NOT NULL
+AND Analyst_Pending_Collection_Date_Latest IS NOT NULL
+AND Analyst_Pending_Declaration_date_Latest IS NOT NULL
+AND Sanction_Date_Initial IS NULL
+AND (Reject_Date IS NULL OR Reject_Date = '1900-01-01')")) |>
+  mutate(File_Category  = "Non-STP",
+         
+         Credit_Analyst = ifelse(is.na(Credit_Analyst) | trimws(Credit_Analyst) == "","Unassigned", Credit_Analyst))
+
+decision_to_be_made_leads <- rbind(decision_stp_leads, decision_non_stp_leads) |>
+  left_join(branch_mapping, by = "Branch") |>
+  left_join(HoRB_mapping, by = "Branch")
+
+decision_to_be_made_summary <- decision_to_be_made_leads |>
+  group_by(Branch) |>
+  summarise(`Decision To Be Made Number` = n(), `Decision To Be Made Amount` = sum(Interested_Amount_To_Mln)) |>
+  as.data.frame() |>
+  left_join(branch_mapping, by = "Branch")
+
+#Lead-wise detail -- exact column naming/order requested for the "Decision To Be Made" tab
+decision_to_be_made_detail <- decision_to_be_made_leads |>
+  transmute(
+    `Lead Reference No` = LeadReferenceNo,
+    Branch,
+    Client                     = ProspectName,
+    `Proposed Amount`          = Interested_Amount_To,
+    `File Category`            = File_Category,
+    `CRG `       = CRG_Applicability,
+    `Lead Creation Date`       = Lead_Approver_Date,
+    `Prospect Completion Date`    = Prospect_Approve_Date_Latest,
+    `Analyst Visit Date`       = CRM_Visit_Date,
+    `Pending Declaration Date` = Analyst_Pending_Declaration_date_Latest,
+    `Pending Collection Date`  = Analyst_Pending_Collection_Date_Latest,
+    `Delayed Processing Reason`  = RequestDelayReason,
+    `Delayed Processing Remarks` = AnalystRemark,
+    Analyst                    = Credit_Analyst,
+    CM,
+    RCM,
+    RM                         = RM_Name,
+    STM                        = STM_Name,
+    HoRB
+  )
+
+#Delayed Processing -- same leads as "Decision To Be Made" above (same STP/Non-STP pulls,
+#same stage logic), further restricted to leads that haven't moved since last_working_day:
+#for STP leads, Analyst Visit Date (CRM_Visit_Date) is not last_working_day; for Non-STP
+#leads, Pending Collection Date (Analyst_Pending_Collection_Date_Latest) is not
+#last_working_day. Same column set/order as the "Decision To Be Made" tab.
+
+delayed_processing_leads <- decision_to_be_made_leads |>
+  filter(
+    (File_Category == "STP"     & CRM_Visit_Date != last_working_day) |
+    (File_Category == "Non-STP" & Analyst_Pending_Collection_Date_Latest != last_working_day)
+  )
+
+#Lead-wise detail -- same column naming/order as the "Decision To Be Made" tab
+delayed_processing_detail <- delayed_processing_leads |>
+  transmute(
+    `Lead Reference No` = LeadReferenceNo,
+    Branch,
+    Client                     = ProspectName,
+    `Proposed Amount`          = Interested_Amount_To,
+    `File Category`            = File_Category,
+    `CRG `       = CRG_Applicability,
+    `Lead Creation Date`       = Lead_Approver_Date,
+    `Prospect Completion Date`    = Prospect_Approve_Date_Latest,
+    `Analyst Visit Date`       = CRM_Visit_Date,
+    `Pending Declaration Date` = Analyst_Pending_Declaration_date_Latest,
+    `Pending Collection Date`  = Analyst_Pending_Collection_Date_Latest,
+    `Delayed Processing Reason`  = RequestDelayReason,
+    `Delayed Processing Remarks` = AnalystRemark,
+    Analyst                    = Credit_Analyst,
+    CM,
+    RCM,
+    RM                         = RM_Name,
+    STM                        = STM_Name,
+    HoRB
+  )
+
+```
+
+```{r}
+
+#Pending Declared But Not Collected -- Non-STP leads that have been declared but not yet
+#collected (Pending Collection Date is still NULL), not yet sanctioned or rejected.
+#Window anchored to Lead_Approver_Date; Analyst_Pending_Declaration_date_Latest only
+#checked for non-null.
+
+pending_declared_not_collected_leads <- dbGetQuery(con,paste0("SELECT Branch,dbo.AnalyticsOCAS.LeadReferenceNo LeadReferenceNo,ProspectName,Interested_Amount_To,Interested_Amount_To/1E6 Interested_Amount_To_Mln,
+[Business Type],CRG_Applicability,LOWER(Analyst_Name) Analyst_Name,[Credit Analyst] as Credit_Analyst,RM_Name,STM_Name,
+CAST(Lead_Approver_Date AS DATE) Lead_Approver_Date,
+CAST(Prospect_Approve_Date_Latest AS DATE) Prospect_Approve_Date_Latest,
+CAST(CRM_Visit_Date AS DATE) CRM_Visit_Date,
+CAST(Analyst_Pending_Declaration_date_Latest AS DATE) Analyst_Pending_Declaration_date_Latest,
+", file_category_sql, " File_Category
+FROM dbo.AnalyticsOCAS
+", stp_join_sql, "
+WHERE Branch NOT IN (", excluded_branches_sql, ")
+AND Product_Category = 'SME'
+AND ", file_category_sql, " = 'Non-STP'
+AND Lead_Approver_Date BETWEEN '", window_start, "' AND '", window_end, "'
+AND Prospect_Approve_Date_Latest IS NOT NULL
+AND CRM_Visit_Date IS NOT NULL
+AND Analyst_Pending_Declaration_date_Latest IS NOT NULL
+AND Analyst_Pending_Collection_Date_Latest IS NULL
+AND Sanction_Date_Initial IS NULL
+AND (Reject_Date IS NULL OR Reject_Date = '1900-01-01')")) |>
+  mutate(
+    Credit_Analyst = ifelse(is.na(Credit_Analyst) | trimws(Credit_Analyst) == "","Unassigned", Credit_Analyst),
+    File_Category = ifelse(is.na(File_Category) | trimws(File_Category) == "","Non-STP", File_Category)
+  ) |>
+  left_join(branch_mapping, by = "Branch") |>
+  left_join(HoRB_mapping, by = "Branch")
+
+pending_declared_not_collected_summary <- pending_declared_not_collected_leads |>
+  group_by(Branch) |>
+  summarise(`Pending Declared Not Collected Number` = n(), `Pending Declared Not Collected Amount` = sum(Interested_Amount_To_Mln)) |>
+  as.data.frame() |>
+  left_join(branch_mapping, by = "Branch")
+
+#Lead-wise detail -- exact column naming/order requested for the "Pending Declared Not Collected" tab
+pending_declared_not_collected_detail <- pending_declared_not_collected_leads |>
+  transmute(
+    `Lead Reference No`        = LeadReferenceNo,
+    Branch,
+    Client                     = ProspectName,
+    `Proposed Amount`          = Interested_Amount_To,
+    `File Category`            = File_Category,
+    `CRG `                     = CRG_Applicability,
+    `Lead Creation Date`       = Lead_Approver_Date,
+    `Prospect Completion Date` = Prospect_Approve_Date_Latest,
+    `Analyst Visit Date`       = CRM_Visit_Date,
+    `Pending Declaration Date` = Analyst_Pending_Declaration_date_Latest,
+    Analyst                    = Credit_Analyst,
+    CM,
+    RCM,
+    RM                         = RM_Name,
+    STM                        = STM_Name,
+    HoRB
+  )
+
+```
+
+```{r}
+
+#Waiting for Prospect Creation -- leads whose Lead Creation Date (Lead_Approver_Date, date
+#only, no time component) falls in the trailing-90-day window (window_start_day through
+#last_working_day), but which have not yet reached Prospect Approve stage.
+#(Already anchored to Lead_Approver_Date -- unchanged.)
+#NOTE: this tab was previously named "Waiting for Lead Creation" -- renamed to "Waiting
+#for Prospect Creation". File Category and CRG are now pulled in as well (via the same
+#STP join/logic used by every other tab), since this tab didn't carry them before.
+
+waiting_for_lead_creation_leads <- dbGetQuery(con,paste0("SELECT Branch,dbo.AnalyticsOCAS.LeadReferenceNo LeadReferenceNo,ProspectName,Interested_Amount_To,Interested_Amount_To/1E6 Interested_Amount_To_Mln,
+[Business Type],CRG_Applicability,RM_Name,STM_Name,
+CAST(Lead_Approver_Date AS DATE) Lead_Approver_Date,
+", file_category_sql, " File_Category
+FROM dbo.AnalyticsOCAS
+", stp_join_sql, "
+WHERE Branch NOT IN (", excluded_branches_sql, ")
+AND Product_Category = 'SME'
+AND CAST(Lead_Approver_Date AS DATE) BETWEEN '", window_start_day, "' AND '", last_working_day, "'
+AND Prospect_Approve_Date_Latest IS NULL")) |>
+  mutate(File_Category = ifelse(is.na(File_Category) | trimws(File_Category) == "","Non-STP", File_Category)) |>
+  left_join(branch_mapping, by = "Branch") |>
+  left_join(HoRB_mapping, by = "Branch")
+
+waiting_for_lead_creation_summary <- waiting_for_lead_creation_leads |>
+  group_by(Branch) |>
+  summarise(`Waiting for Lead Creation Number` = n(), `Waiting for Lead Creation Amount` = sum(Interested_Amount_To_Mln)) |>
+  as.data.frame() |>
+  left_join(branch_mapping, by = "Branch")
+
+#Lead-wise detail -- exact column naming/order requested for the "Waiting for Prospect Creation" tab
+waiting_for_lead_creation_detail <- waiting_for_lead_creation_leads |>
+  transmute(
+    LeadReferenceNo,
+    Branch,
+    Client               = ProspectName,
+    `Proposed Amount`    = Interested_Amount_To,
+    `File Category`      = File_Category,
+    `CRG `       = CRG_Applicability,
+    `Lead Creation Date` = Lead_Approver_Date,
+    CM,
+    RCM,
+    RM                   = RM_Name,
+    STM                  = STM_Name,
+    HoRB
+  )
+
+```
+
+
+```{r}
+
+#Pipeline summary totals for the greeting table below -- Amount converted from Million
+#BDT to Crore BDT (divide by 10) and rounded to 2 decimals.
+
+total_to_be_visited_number      <- sum(to_be_visited_summary$`To Be Visited Number`)
+total_to_be_visited_amount_mln  <- sum(to_be_visited_summary$`To Be Visited Amount`)
+
+total_pending_to_be_declared_number     <- sum(pending_to_be_declared_summary$`Pending To Be Declared Number`)
+total_pending_to_be_declared_amount_mln <- sum(pending_to_be_declared_summary$`Pending To Be Declared Amount`)
+
+total_decision_to_be_made_number     <- sum(decision_to_be_made_summary$`Decision To Be Made Number`)
+total_decision_to_be_made_amount_mln <- sum(decision_to_be_made_summary$`Decision To Be Made Amount`)
+
+total_pending_declared_not_collected_number     <- sum(pending_declared_not_collected_summary$`Pending Declared Not Collected Number`)
+total_pending_declared_not_collected_amount_mln <- sum(pending_declared_not_collected_summary$`Pending Declared Not Collected Amount`)
+
+total_waiting_for_lead_creation_number     <- sum(waiting_for_lead_creation_summary$`Waiting for Lead Creation Number`)
+total_waiting_for_lead_creation_amount_mln <- sum(waiting_for_lead_creation_summary$`Waiting for Lead Creation Amount`)
+
+```
+
+**Dear Approvers,**
+
+Please find the pipeline status below.
+
+```{r}
+
+#Shared header accent colour -- used for the Pipeline Status table's header + its
+#"Total Under Process" row, and for the new Final Decision table's header below it.
+pipeline_header_color <- "#b8b5b4"
+
+#Pipeline status table -- replaces the old bullet-point greeting. "Total Under Process"
+#is the sum of all five stages above it. Row order now matches the Excel tab order
+#(To Be Visited, Pending To Be Declared, Decision To Be Made, Pending Declared Not
+#Collected, Waiting for Prospect Creation).
+
+pipeline_status_df <- tibble::tribble(
+  ~Stage,                                ~Number,                                       ~Amount,
+  "To Be Visited",                       total_to_be_visited_number,                    round(total_to_be_visited_amount_mln, 2),
+  "Pending To Be Declared",              total_pending_to_be_declared_number,           round(total_pending_to_be_declared_amount_mln, 2),
+  "Decision To Be Made",                 total_decision_to_be_made_number,              round(total_decision_to_be_made_amount_mln, 2),
+  "Pending Declared Not Collected",      total_pending_declared_not_collected_number,   round(total_pending_declared_not_collected_amount_mln, 2),
+  "Waiting for Prospect Creation",       total_waiting_for_lead_creation_number,        round(total_waiting_for_lead_creation_amount_mln, 2)
+)
+
+pipeline_status_df <- pipeline_status_df |>
+  bind_rows(
+    tibble::tibble(
+      Stage  = "Total Under Process",
+      Number = sum(pipeline_status_df$Number),
+      Amount = round(sum(pipeline_status_df$Amount), 2)
+    )
+  )
+
+pipeline_total_row <- nrow(pipeline_status_df)
+
+pipeline_status_df |>
+  gt() |>
+  fmt_number(columns = Amount, decimals = 2) |>
+  cols_label(
+    Stage  = "Stage",
+    Number = "Number",
+    Amount = "Amount(Mln)"
+  ) |>
+  tab_options(
+    table.align = "left",
+    table.border.top.style = "solid",
+    table.border.top.width = px(1),
+    table.border.bottom.style = "solid",
+    table.border.bottom.width = px(1),
+    column_labels.font.weight = "bold",
+    data_row.padding = px(4)
+  ) |>
+  opt_table_font(font = "IDLC") |>
+  tab_options(
+    table.width = pct(40),
+    table.font.size = px(13)
+  ) |>
+  tab_style(
+    style = cell_text(font = "IDLC", size = px(13)),
+    locations = list(cells_body(), cells_column_labels())
+  ) |>
+  tab_style(
+    style = cell_borders(sides = c("top", "bottom", "left", "right"), color = "black", weight = px(1)),
+    locations = list(cells_body(), cells_column_labels())
+  ) |>
+  #-- Header row -> shared accent colour, bold white text
+  tab_style(
+    style = list(
+      cell_text(font = "IDLC", color = "black", weight = "bold", size = px(13)),
+      cell_fill(color = pipeline_header_color)
+    ),
+    locations = cells_column_labels()
+  ) |>
+  #-- "Total Under Process" row -> same accent colour, bold
+  tab_style(
+    style = list(
+      cell_text(font = "IDLC", weight = "bold", size = px(13)),
+      cell_fill(color = "#d6d3d2")
+    ),
+    locations = cells_body(rows = pipeline_total_row)
+  )
+
+```
+<br><br>
+
+```{r}
+
+#Final Decision table -- Sanctioned / Rejected / Insufficient Documents and Delayed
+#Negotiation counts + amounts for the current month, from month_start_day (first working
+#day of the current month) through last_working_day (yesterday).
+
+month_start_day <- as.Date(bizdays::adjust.next(lubridate::floor_date(last_working_day, "month"), "BD"))
+
+sanctioned_pull <- dbGetQuery(con,paste0("SELECT COUNT(*) Cnt, SUM(Sanc_Amt)/1E6 AmtMln
+FROM dbo.AnalyticsOCAS
+WHERE Branch NOT IN (", excluded_branches_sql, ")
+AND Sanction_Date_Initial IS NOT NULL
+AND Product_Category = 'SME'
+AND CAST(Sanction_Date_Initial AS DATE) BETWEEN '", month_start_day, "' AND '", last_working_day, "'"))
+# AND Product_Category = 'SME'
+
+reject_pull <- dbGetQuery(con,paste0("SELECT Reason_Of_Rejection, COUNT(*) Cnt, SUM(Interested_Amount_To)/1E6 AmtMln
+FROM dbo.AnalyticsOCAS
+WHERE Branch NOT IN (", excluded_branches_sql, ")
+AND Reject_Date IS NOT NULL
+AND Reject_Date <> '1900-01-01'
+AND Product_Category = 'SME'
+AND CAST(Reject_Date AS DATE) BETWEEN '", month_start_day, "' AND '", last_working_day, "'
+GROUP BY Reason_Of_Rejection"))
+
+rejected_agg <- reject_pull |>
+  filter(!Reason_Of_Rejection %in% excluded_rejection_reasons) |>
+  summarise(Cnt = sum(Cnt, na.rm = TRUE), Amt = sum(AmtMln, na.rm = TRUE))
+
+insufficient_agg <- reject_pull |>
+  filter(Reason_Of_Rejection %in% excluded_rejection_reasons) |>
+  summarise(Cnt = sum(Cnt, na.rm = TRUE), Amt = sum(AmtMln, na.rm = TRUE))
+
+final_decision_df <- tibble::tribble(
+  ~`Final Decision`,                                 ~Number,                                                          ~Amount,
+  "Sanctioned",                                       ifelse(is.na(sanctioned_pull$Cnt[1]), 0, sanctioned_pull$Cnt[1]), round(ifelse(is.na(sanctioned_pull$AmtMln[1]), 0, sanctioned_pull$AmtMln[1]), 2),
+  "Rejected",                                         rejected_agg$Cnt[1],                                              round(rejected_agg$Amt[1], 2),
+  "Insufficient Documents and Delayed Negotiation",   insufficient_agg$Cnt[1],                                          round(insufficient_agg$Amt[1], 2)
+)
+
+final_decision_df |>
+  gt() |>
+  fmt_number(columns = Amount, decimals = 2) |>
+  cols_label(
+    `Final Decision` = "Final Decision",
+    Number   = "Number",
+    Amount   = "Amount(Mln)"
+  ) |>
+  tab_options(
+    table.align = "left",
+    table.border.top.style = "solid",
+    table.border.top.width = px(1),
+    table.border.bottom.style = "solid",
+    table.border.bottom.width = px(1),
+    column_labels.font.weight = "bold",
+    data_row.padding = px(4)
+  ) |>
+  opt_table_font(font = "IDLC") |>
+  tab_options(
+    table.width = pct(45),
+    table.font.size = px(13)
+  ) |>
+  tab_style(
+    style = cell_text(font = "IDLC", size = px(13)),
+    locations = list(cells_body(), cells_column_labels())
+  ) |>
+  tab_style(
+    style = cell_borders(sides = c("top", "bottom", "left", "right"), color = "black", weight = px(1)),
+    locations = list(cells_body(), cells_column_labels())
+  ) |>
+  #-- Header row -> same shared accent colour as the Pipeline Status table, bold white text
+  tab_style(
+    style = list(
+      cell_text(font = "IDLC", color = "Black", weight = "bold", size = px(13)),
+      cell_fill(color = pipeline_header_color)
+    ),
+    locations = cells_column_labels()
+  )
+
+```
+<br><br><br>
+
+```{r}
+
+#Sanctioned / Rejected / Insufficient Docs & Del. Nego. -- lead-wise detail tabs, same
+#current-month window (month_start_day through last_working_day) as the Final Decision
+#summary table above, so the tab totals tie out to that table.
+
+#-- Sanctioned: Final Approver is resolved from sme.Approver (Appraisal_Approver_Final
+#is a userid/coe code in AnalyticsOCAS; sme.Approver.userid maps it to a full name in
+#the "Approver Name" column).
+sanctioned_leads <- dbGetQuery(con,paste0("SELECT Branch,dbo.AnalyticsOCAS.LeadReferenceNo LeadReferenceNo,ProspectName,Interested_Amount_To,Sanc_Amt,
+CRG_Applicability,[Credit Analyst] as Credit_Analyst,RM_Name,STM_Name,
+CAST(Lead_Approver_Date AS DATE) Lead_Approver_Date,
+CAST(Prospect_Approve_Date_Latest AS DATE) Prospect_Approve_Date_Latest,
+CAST(CRM_Visit_Date AS DATE) CRM_Visit_Date,
+CAST(Analyst_Pending_Declaration_date_Latest AS DATE) Analyst_Pending_Declaration_date_Latest,
+CAST(Analyst_Pending_Collection_Date_Latest AS DATE) Analyst_Pending_Collection_Date_Latest,
+CAST(Sanction_Date_Initial AS DATE) Sanction_Date_Initial,
+ap.[Approver Name] Final_Approver,
+", file_category_sql, " File_Category
+FROM dbo.AnalyticsOCAS
+", stp_join_sql, "
+LEFT JOIN sme.Approver ap ON dbo.AnalyticsOCAS.Appraisal_Approver_Final = ap.userid
+WHERE Branch NOT IN (", excluded_branches_sql, ")
+AND Product_Category = 'SME'
+AND Sanction_Date_Initial IS NOT NULL
+AND CAST(Sanction_Date_Initial AS DATE) BETWEEN '", month_start_day, "' AND '", last_working_day, "'")) |>
+  mutate(
+    Credit_Analyst = ifelse(is.na(Credit_Analyst) | trimws(Credit_Analyst) == "","Unassigned", Credit_Analyst),
+    File_Category = ifelse(is.na(File_Category) | trimws(File_Category) == "","Non-STP", File_Category)) |>
+  left_join(branch_mapping, by = "Branch") |>
+  left_join(HoRB_mapping, by = "Branch")
+
+#Lead-wise detail -- exact column naming/order requested for the "Sanctioned" tab
+sanctioned_detail <- sanctioned_leads |>
+  transmute(
+    `Lead Reference No`        = LeadReferenceNo,
+    Branch,
+    Client                     = ProspectName,
+    `Proposed Amount`          = Interested_Amount_To,
+    `Sanctioned Amount`        = Sanc_Amt,
+    `File Category`            = File_Category,
+    `CRG `                     = CRG_Applicability,
+    `Lead Creation Date`       = Lead_Approver_Date,
+    `Prospect Completion Date` = Prospect_Approve_Date_Latest,
+    `Analyst Visit Date`       = CRM_Visit_Date,
+    `Pending Declaration Date` = Analyst_Pending_Declaration_date_Latest,
+    `Pending Collection Date`  = Analyst_Pending_Collection_Date_Latest,
+    `Sanction Date`            = Sanction_Date_Initial,
+    Analyst                    = Credit_Analyst,
+    `Final Approver`           = Final_Approver,
+    CM,
+    RCM,
+    RM                         = RM_Name,
+    STM                        = STM_Name,
+    HoRB
+  )
+
+#-- Rejected + Insufficient Docs & Del. Nego. -- pulled together (same base query as the
+#Final Decision reject_pull above, but at lead level), then split by Reason_Of_Rejection
+#into the two tabs.
+rejected_all_leads <- dbGetQuery(con,paste0("SELECT Branch,dbo.AnalyticsOCAS.LeadReferenceNo LeadReferenceNo,ProspectName,Interested_Amount_To,
+CRG_Applicability,[Credit Analyst] as Credit_Analyst,RM_Name,STM_Name,
+CAST(Lead_Approver_Date AS DATE) Lead_Approver_Date,
+CAST(Prospect_Approve_Date_Latest AS DATE) Prospect_Approve_Date_Latest,
+CAST(CRM_Visit_Date AS DATE) CRM_Visit_Date,
+CAST(Analyst_Pending_Declaration_date_Latest AS DATE) Analyst_Pending_Declaration_date_Latest,
+CAST(Analyst_Pending_Collection_Date_Latest AS DATE) Analyst_Pending_Collection_Date_Latest,
+CAST(Reject_Date AS DATE) Reject_Date,
+Reason_Of_Rejection,
+dbo.AnalyticsOCASV2.RejectReasonDetail RejectReasonDetail,
+", file_category_sql, " File_Category
+FROM dbo.AnalyticsOCAS
+", stp_join_sql, "
+WHERE Branch NOT IN (", excluded_branches_sql, ")
+AND Product_Category = 'SME'
+AND Reject_Date IS NOT NULL
+AND Reject_Date <> '1900-01-01'
+AND CAST(Reject_Date AS DATE) BETWEEN '", month_start_day, "' AND '", last_working_day, "'")) |>
+  mutate(
+    Credit_Analyst = ifelse(is.na(Credit_Analyst) | trimws(Credit_Analyst) == "","Unassigned", Credit_Analyst),
+    File_Category = ifelse(is.na(File_Category) | trimws(File_Category) == "","Non-STP", File_Category)) |>
+  left_join(branch_mapping, by = "Branch") |>
+  left_join(HoRB_mapping, by = "Branch")
+
+rejected_leads     <- rejected_all_leads |> filter(!Reason_Of_Rejection %in% excluded_rejection_reasons)
+insufficient_leads <- rejected_all_leads |> filter(Reason_Of_Rejection %in% excluded_rejection_reasons)
+
+#Lead-wise detail -- exact column naming/order requested for the "Rejected" tab
+rejected_detail <- rejected_leads |>
+  transmute(
+    `Lead Reference No`        = LeadReferenceNo,
+    Branch,
+    Client                     = ProspectName,
+    `Proposed Amount`          = Interested_Amount_To,
+    `File Category`            = File_Category,
+    `CRG `                     = CRG_Applicability,
+    `Lead Creation Date`       = Lead_Approver_Date,
+    `Prospect Completion Date` = Prospect_Approve_Date_Latest,
+    `Analyst Visit Date`       = CRM_Visit_Date,
+    `Pending Declaration Date` = Analyst_Pending_Declaration_date_Latest,
+    `Pending Collection Date`  = Analyst_Pending_Collection_Date_Latest,
+    `Rejection Date`           = Reject_Date,
+    `Rejection Reason`         = Reason_Of_Rejection,
+    `Rejection Remarks`        = RejectReasonDetail,
+    Analyst                    = Credit_Analyst,
+    CM,
+    RCM,
+    RM                         = RM_Name,
+    STM                        = STM_Name,
+    HoRB
+  )
+
+#Lead-wise detail -- exact column naming/order requested for the "Insufficient Docs & Del. Nego." tab
+insufficient_detail <- insufficient_leads |>
+  transmute(
+    `Lead Reference No`        = LeadReferenceNo,
+    Branch,
+    Client                     = ProspectName,
+    `Proposed Amount`          = Interested_Amount_To,
+    `File Category`            = File_Category,
+    `CRG `                     = CRG_Applicability,
+    `Lead Creation Date`       = Lead_Approver_Date,
+    `Prospect Completion Date` = Prospect_Approve_Date_Latest,
+    `Analyst Visit Date`       = CRM_Visit_Date,
+    `Pending Declaration Date` = Analyst_Pending_Declaration_date_Latest,
+    `Pending Collection Date`  = Analyst_Pending_Collection_Date_Latest,
+    `Rejection Date`           = Reject_Date,
+    `Rejection Reason`         = Reason_Of_Rejection,
+    `Rejection Remarks`        = RejectReasonDetail,
+    Analyst                    = Credit_Analyst,
+    CM,
+    RCM,
+    RM                         = RM_Name,
+    STM                        = STM_Name,
+    HoRB
+  )
+
+```
+
+```{r}
+#Yesterday's Status -- Visited / Pending Declared / Decision Finalized (exact date match on last_working_day)
+visited_summary <- dbGetQuery(con,paste0("SELECT Branch, COUNT(*) [Visited Number], SUM(Interested_Amount_To)/1E6 [Visited Amount]
+FROM dbo.AnalyticsOCAS
+WHERE Branch NOT IN (", excluded_branches_sql, ")
+AND CAST(CRM_Visit_Date AS DATE) = '", yday, "'
+AND Product_Category = 'SME'
+GROUP BY Branch")) |>
+  left_join(branch_mapping, by = "Branch")
+
+pending_declared_summary <- dbGetQuery(con,paste0("SELECT Branch, COUNT(*) [Pending Declared Number], SUM(Interested_Amount_To)/1E6 [Pending Declared Amount]
+FROM dbo.AnalyticsOCAS
+INNER JOIN dbo.AnalyticsOCASV2 ON dbo.AnalyticsOCAS.LeadReferenceNo = dbo.AnalyticsOCASV2.LeadReferenceNo
+WHERE Branch NOT IN (", excluded_branches_sql, ")
+AND ", file_category_sql, " = 'Non-STP'
+AND Product_Category = 'SME'
+AND CAST(Analyst_Pending_Declaration_date_Latest AS DATE) = '", yday, "'
+GROUP BY Branch")) |>
+  left_join(branch_mapping, by = "Branch")
+decision_finalized_sanctioned <- dbGetQuery(con,paste0("SELECT Branch, LeadReferenceNo, Product_Category, Sanc_Amt/1E6 Interested_Amount_To
+FROM dbo.AnalyticsOCAS
+WHERE Branch NOT IN (", excluded_branches_sql, ")
+AND Product_Category = 'SME'
+AND CAST(Sanction_Date_Initial AS DATE) = '", yday, "'"))
+
+decision_finalized_rejected <- dbGetQuery(con,paste0("SELECT Branch, LeadReferenceNo, Product_Category, Interested_Amount_To/1E6 Interested_Amount_To
+FROM dbo.AnalyticsOCAS
+WHERE Branch NOT IN (", excluded_branches_sql, ")
+AND CAST(Reject_Date AS DATE) = '", yday, "'
+AND Product_Category = 'SME'
+AND Reason_Of_Rejection NOT IN (", excluded_rejection_sql, ")"))
+
+decision_finalized_summary <- rbind(decision_finalized_sanctioned, decision_finalized_rejected) |>
+  group_by(Branch) |>
+  summarise(`Decision Finalized Number` = n(), `Decision Finalized Amount` = sum(Interested_Amount_To)) |>
+  as.data.frame() |>
+  left_join(branch_mapping, by = "Branch")
+```
+
+```{r}
+
+#Yesterday's Projection -- read back the plan saved in yesterday's workbook
+
+today_cols <- c("To Be Visited Number", "To Be Visited Amount",
+                "Pending To Be Declared Number", "Pending To Be Declared Amount",
+                "Decision To Be Made Number", "Decision To Be Made Amount")
+
+#NOTE: the saved Dashboard sheet is now RCM-wise (col A = RCM, col B = Branch, data
+#starts row 4, and includes "Sub-total"/"Total" rows interspersed) -- those rows are
+#dropped here so only real branch rows feed into yesterday_record.
+if (file.exists(yesterday_file)) {
+  raw <- openxlsx2::wb_load(yesterday_file) |>
+    openxlsx2::wb_to_df(sheet = "Dashboard", start_row = 4, col_names = FALSE)
+  names(raw)[1] <- "RCM_Display"
+  names(raw)[2] <- "Branch"
+  names(raw)[3:8] <- today_cols
+  yesterday_record <- raw |>
+    filter(!Branch %in% c("Sub-total", "Sub Total", "Total")) |>
+    select(Branch, all_of(today_cols)) |>
+    mutate(across(all_of(today_cols), as.numeric))
+} else {
+  yesterday_record <- data.frame(Branch = character(), check.names = FALSE)
+  yesterday_record[today_cols] <- numeric()
+}
+
+yesterday_record <- yesterday_record |>
+  rename(
+    `Yesterday_To Be Visited Number`          = `To Be Visited Number`,
+    `Yesterday_To Be Visited Amount`          = `To Be Visited Amount`,
+    `Yesterday_Pending To Be Declared Number` = `Pending To Be Declared Number`,
+    `Yesterday_Pending To Be Declared Amount` = `Pending To Be Declared Amount`,
+    `Yesterday_Decision To Be Made Number`    = `Decision To Be Made Number`,
+    `Yesterday_Decision To Be Made Amount`    = `Decision To Be Made Amount`
+  )
+
+```
+
+```{r}
+
+#Dashboard -- join every piece by Branch, same list + reduce(left_join) pattern as the analyst report
+#branch_mapping now also contributes RCM so the dashboard can be re-cut RCM-wise below.
+
+list_df <- list(
+  branch_mapping |> select(Branch, RCM),
+  to_be_visited_summary          |> select(Branch, `To Be Visited Number`, `To Be Visited Amount`),
+  pending_to_be_declared_summary |> select(Branch, `Pending To Be Declared Number`, `Pending To Be Declared Amount`),
+  decision_to_be_made_summary    |> select(Branch, `Decision To Be Made Number`, `Decision To Be Made Amount`),
+  yesterday_record,
+  visited_summary                |> select(Branch, `Visited Number`, `Visited Amount`),
+  pending_declared_summary       |> select(Branch, `Pending Declared Number`, `Pending Declared Amount`),
+  decision_finalized_summary     |> select(Branch, `Decision Finalized Number`, `Decision Finalized Amount`)
+)
+
+dashboard_df <- list_df |> reduce(left_join, by = "Branch")
+
+dashboard_df[is.na(dashboard_df)] <- 0
+
+dashboard_df <- dashboard_df |> filter(!Branch %in% excluded_branches)
+
+```
+
+```{r}
+
+#RCM-wise re-cut of the dashboard (used for "Today's Projection").
+#Each RCM's branches are grouped together (RCM label shown once per group, blank for the
+#remaining branch rows of that RCM so it reads as a merged cell), followed by a Sub-total
+#row for that RCM, with a final grand Total row at the bottom.
+
+metric_cols <- c(
+  "To Be Visited Number", "To Be Visited Amount",
+  "Pending To Be Declared Number", "Pending To Be Declared Amount",
+  "Decision To Be Made Number", "Decision To Be Made Amount",
+  "Yesterday_To Be Visited Number", "Yesterday_To Be Visited Amount",
+  "Visited Number", "Visited Amount",
+  "Yesterday_Pending To Be Declared Number", "Yesterday_Pending To Be Declared Amount",
+  "Pending Declared Number", "Pending Declared Amount",
+  "Yesterday_Decision To Be Made Number", "Yesterday_Decision To Be Made Amount",
+  "Decision Finalized Number", "Decision Finalized Amount"
+)
+
+build_rcm_dashboard <- function(df, metric_cols, rcm_order, nickname_map) {
+
+  df <- df |>
+    mutate(RCM = factor(RCM, levels = rcm_order)) |>
+    arrange(RCM, Branch)
+
+  group_blocks <- lapply(rcm_order, function(rcm_name) {
+    grp <- df |> filter(RCM == rcm_name)
+    if (nrow(grp) == 0) return(NULL)
+
+    branch_rows <- grp |>
+      mutate(
+        RCM_Display = c(unname(nickname_map[rcm_name]), rep(NA_character_, dplyr::n() - 1)),
+        Row_Type    = "Branch"
+      ) |>
+      select(RCM_Display, Branch, Row_Type, all_of(metric_cols)) |>
+      mutate(Group = rcm_name)
+
+    subtotal_row <- grp |>
+      summarise(across(all_of(metric_cols), sum)) |>
+      mutate(RCM_Display = NA_character_, Branch = "Sub-total", Row_Type = "Subtotal", Group = rcm_name) |>
+      select(RCM_Display, Branch, Row_Type, Group, all_of(metric_cols))
+
+    bind_rows(branch_rows, subtotal_row)
+  })
+
+  result <- bind_rows(group_blocks)
+
+  total_row <- df |>
+    summarise(across(all_of(metric_cols), sum)) |>
+    mutate(RCM_Display = NA_character_, Branch = "Total", Row_Type = "Total", Group = NA_character_) |>
+    select(RCM_Display, Branch, Row_Type, Group, all_of(metric_cols))
+
+  bind_rows(result, total_row)
+}
+
+rcm_dashboard_df <- build_rcm_dashboard(dashboard_df, metric_cols, rcm_order, rcm_nickname_map)
+
+```
+
+```{r}
+
+dashboard_gt_df <- dashboard_df |>
+  mutate(RCM_Nickname = unname(rcm_nickname_map[RCM])) |>
+  select(RCM_Nickname, Branch, all_of(metric_cols)) |>
+  mutate(RCM_Nickname = factor(RCM_Nickname, levels = unname(rcm_nickname_map[rcm_order]))) |>
+  arrange(RCM_Nickname, Branch)
+
+nickname_order <- levels(dashboard_gt_df$RCM_Nickname)
+
+
+today_spanner_defs <- list(
+  list(label = "To Be Visited",          id = "tbv_today",  columns = c("To Be Visited Number", "To Be Visited Amount"),         color = "#E2F0D9"),
+  list(label = "Pending To Be Declared", id = "ptbd_today", columns = c("Pending To Be Declared Number", "Pending To Be Declared Amount"), color = "#FBE5D6"),
+  list(label = "Decision To Be Made",    id = "dtbm_today", columns = c("Decision To Be Made Number", "Decision To Be Made Amount"),         color = "#DAE3F3")
+)
+
+#--------------------------------------------------------------------------
+# UPDATED:
+#  1) header_color is now passed in as "#E84A45" from the call site below,
+#     and is used for BOTH the header (spanner/column-label/stubhead) AND
+#     the Grand Total row -- see the Grand Total tab_style block near the
+#     bottom of this function.
+#  2) Sub-total and Grand Total row text is now explicitly center-aligned
+#     (align = "center" added to their cell_text() calls), matching the
+#     Yesterday's Projection table's Sub-total/Total alignment.
+#--------------------------------------------------------------------------
+build_projection_gt <- function(df, spanner_defs, top_label, top_id, header_color, rcm_color, table_width) {
+
+  metric_cols_tbl <- unlist(lapply(spanner_defs, `[[`, "columns"), use.names = FALSE)
+  number_cols_tbl <- metric_cols_tbl[grepl("Number$", metric_cols_tbl)]
+  amount_cols_tbl <- metric_cols_tbl[grepl("Amount$", metric_cols_tbl)]
+  spanner_ids     <- vapply(spanner_defs, `[[`, character(1), "id")
+
+  label_list <- as.list(setNames(rep(c("Number", "Amount(Mln)"), length(metric_cols_tbl) / 2), metric_cols_tbl))
+
+  gt_tbl <- df |>
+    select(RCM_Nickname, Branch, all_of(metric_cols_tbl)) |>
+    gt(groupname_col = "RCM_Nickname") |>
+    tab_options(row_group.as_column = TRUE) |>
+    row_group_order(groups = nickname_order) |>
+    tab_stubhead(label = "RCM") |>
+    tab_options(
+      table.border.top.style    = "solid",
+      table.border.top.width    = px(2),
+      table.border.bottom.style = "solid",
+      table.border.bottom.width = px(2)
+    ) |>
+    opt_table_font(font = "IDLC") |>
+    tab_options(
+      table.width  = table_width,
+      data_row.padding = px(3),
+      table.font.size  = px(13),
+      row_group.font.weight = "bold",
+      row.striping.include_table_body = FALSE
+    ) |>
+    cols_width(Branch ~ px(150)) |>
+    fmt_number(columns = all_of(number_cols_tbl), decimals = 0) |>
+    fmt_number(columns = all_of(amount_cols_tbl), decimals = 2) |>
+    cols_label(Branch = "Branch", .list = label_list)
+
+  #-- one spanner per stage
+  for (s in spanner_defs) {
+    gt_tbl <- gt_tbl |> tab_spanner(label = s$label, id = s$id, columns = all_of(s$columns))
+  }
+
+  #-- (outer top_id spanner intentionally NOT added -- see NOTE above the function.
+  #   top_label/top_id are still accepted as arguments for backward compatibility with
+  #   the call sites below, they're just unused now.)
+
+  gt_tbl <- gt_tbl |>
+    summary_rows(
+      groups = everything(), columns = all_of(number_cols_tbl),
+      fns = list(`Sub-total` = ~sum(., na.rm = TRUE)), formatter = fmt_integer, use_seps = TRUE
+    ) |>
+    summary_rows(
+      groups = everything(), columns = all_of(amount_cols_tbl),
+      fns = list(`Sub-total` = ~sum(., na.rm = TRUE)), formatter = fmt_number, decimals = 2
+    ) |>
+    grand_summary_rows(
+      columns = all_of(number_cols_tbl),
+      fns = list(`Total` = ~sum(., na.rm = TRUE)), formatter = fmt_integer, use_seps = TRUE
+    ) |>
+    grand_summary_rows(
+      columns = all_of(amount_cols_tbl),
+      fns = list(`Total` = ~sum(., na.rm = TRUE)), formatter = fmt_number, decimals = 2
+    ) |>
+    tab_style(
+      style = cell_text(font = "IDLC", color = "black", align = "center", weight = "normal", v_align = "middle", size = px(13)),
+      locations = cells_body()
+    ) |>
+    #-- Header: RCM (stubhead) + Branch + every column label -> header_color
+    tab_style(
+      style = list(
+        cell_text(font = "IDLC", color = "white", align = "center", weight = "bold", v_align = "middle", size = px(13)),
+        cell_fill(color = header_color)
+      ),
+      locations = list(
+        cells_stubhead(),
+        cells_column_labels(columns = c(Branch, all_of(metric_cols_tbl)))
+      )
+    ) |>
+    #-- Branch column body cells (normal data rows) -> rcm_color, black NOT bold text
+    tab_style(
+      style = list(cell_fill(color = rcm_color), cell_text(font = "IDLC", weight = "normal", color = "black", size = px(13))),
+      locations = cells_body(columns = Branch)
+    )
+    #-- (top-level spanner tab_style block removed along with the outer spanner)
+
+  #-- one tab_style call per stage spanner id (gt only reliably repaints every id in the
+  #list when each gets its own call -- see note in the original combined-table version)
+  for (s in spanner_defs) {
+    gt_tbl <- gt_tbl |>
+      tab_style(
+        style = list(cell_text(font = "IDLC", color = "white", weight = "bold", size = px(13)), cell_fill(color = header_color)),
+        locations = cells_column_spanners(spanners = s$id)
+      ) |>
+      #-- that stage's Number/Amount body cells -> its own colour, black NOT bold text
+      #(To Be Visited = green, Pending To Be Declared = orange, Decision To Be Made = blue)
+      tab_style(
+        style = list(cell_fill(color = s$color), cell_text(font = "IDLC", weight = "normal", color = "black", size = px(13))),
+        locations = cells_body(columns = all_of(s$columns))
+      )
+  }
+
+  gt_tbl |>
+    #-- RCM group-label cells (the real merged column, one cell per RCM spanning its
+    #branches) -> rcm_color, black NOT bold text -- this colour never changes, including
+    #on Sub-total/Total rows, matching the reference workbook (the RCM cell is just the
+    #merged continuation of the group label there)
+    tab_style(
+      style = list(
+        cell_fill(color = rcm_color),
+        cell_text(font = "IDLC", weight = "normal", color = "black", v_align = "middle", size = px(13))
+      ),
+      locations = cells_row_groups()
+    ) |>
+    #-- Sub-total rows: Branch + every metric cell -> rcm_color, black BOLD text, CENTER
+    #aligned (stage colours disappear here, matching the reference workbook)
+    tab_style(
+      style = list(
+        cell_fill(color = rcm_color),
+        cell_text(font = "IDLC", weight = "bold", color = "black", align = "center", size = px(13))
+      ),
+      locations = list(cells_summary(), cells_stub_summary())
+    ) |>
+    #-- Grand Total row: header_color fill (same accent as the header, per updated
+    #requirement), bold black text, CENTER aligned
+    tab_style(
+      style = list(
+        cell_fill(color = header_color),
+        cell_text(font = "IDLC", weight = "bold", color = "white", align = "center", size = px(13))
+      ),
+      locations = list(cells_grand_summary(), cells_stub_grand_summary())
+    ) |>
+    tab_style(
+      style = list(cell_borders(sides = c("top", "bottom", "left", "right"), color = "gray", weight = px(1))),
+      locations = list(cells_body(), cells_stub(), cells_row_groups(), cells_summary(), cells_stub_summary(),
+                        cells_grand_summary(), cells_stub_grand_summary())
+    ) |>
+    tab_style(
+      style = list(cell_borders(sides = c("top", "bottom", "left", "right"), color = "black", weight = px(1.5))),
+      locations = list(cells_column_labels(), cells_stubhead())
+    ) |>
+    tab_style(
+      style = list(cell_borders(sides = c("top", "bottom", "left", "right"), color = "black", weight = px(1.5))),
+      locations = cells_column_spanners()
+    )
+}
+
+```
+
+```{r}
+
+yday_metric_cols <- c(
+  "Yesterday_To Be Visited Number", "Yesterday_To Be Visited Amount",
+  "Visited Number", "Visited Amount",
+  "Yesterday_Pending To Be Declared Number", "Yesterday_Pending To Be Declared Amount",
+  "Pending Declared Number", "Pending Declared Amount",
+  "Yesterday_Decision To Be Made Number", "Yesterday_Decision To Be Made Amount",
+  "Decision Finalized Number", "Decision Finalized Amount"
+)
+
+#-- Sum branch-level metrics up to CM level, within each RCM
+dashboard_cm_raw <- dashboard_df |>
+  left_join(branch_mapping |> select(Branch, CM), by = "Branch") |>
+  group_by(RCM, CM) |>
+  summarise(across(all_of(yday_metric_cols), \(x) sum(x, na.rm = TRUE)), .groups = "drop")
+
+#-- CM display order within each RCM = order of first appearance in branch_mapping
+cm_seq <- branch_mapping |>
+  distinct(RCM, CM) |>
+  mutate(seq_id = row_number())
+
+build_rcm_cm_dashboard <- function(df, metric_cols, rcm_order, rcm_nickname_map, cm_nickname_map, cm_seq) {
+
+  df <- df |>
+    left_join(cm_seq, by = c("RCM", "CM")) |>
+    mutate(RCM = factor(RCM, levels = rcm_order)) |>
+    arrange(RCM, seq_id)
+
+  group_blocks <- lapply(rcm_order, function(rcm_name) {
+    grp <- df |> filter(RCM == rcm_name)
+    if (nrow(grp) == 0) return(NULL)
+
+    cm_rows <- grp |>
+      mutate(
+        RCM_Display = unname(rcm_nickname_map[rcm_name]),
+        CM_Display  = unname(cm_nickname_map[CM]),
+        Row_Type    = "CM"
+      ) |>
+      select(RCM_Display, CM_Display, Row_Type, all_of(metric_cols)) |>
+      mutate(Group = rcm_name)
+
+    subtotal_row <- grp |>
+      summarise(across(all_of(metric_cols), sum)) |>
+      mutate(RCM_Display = unname(rcm_nickname_map[rcm_name]), CM_Display = "Sub-total",
+             Row_Type = "Subtotal", Group = rcm_name) |>
+      select(RCM_Display, CM_Display, Row_Type, Group, all_of(metric_cols))
+
+    bind_rows(cm_rows, subtotal_row)
+  })
+
+  result <- bind_rows(group_blocks)
+
+  total_row <- df |>
+    summarise(across(all_of(metric_cols), sum)) |>
+    #-- CM_Display intentionally left BLANK ("") for the grand Total row: RCM_Display =
+    #"Total" already becomes its own row-group label (shown once, in the RCM/group
+    #column), so also writing "Total" into CM_Display would print the word a second
+    #time in the very next cell of the same row.
+    mutate(RCM_Display = "Total", CM_Display = "", Row_Type = "Total", Group = NA_character_) |>
+    select(RCM_Display, CM_Display, Row_Type, Group, all_of(metric_cols))
+
+  bind_rows(result, total_row)
+}
+
+rcm_cm_dashboard_df <- build_rcm_cm_dashboard(
+  dashboard_cm_raw, yday_metric_cols, rcm_order, rcm_nickname_map, cm_nickname_map, cm_seq
+)
+
+#-- Achievement ratios (NA when the planned/denominator figure is 0, shown as "-" in the table)
+safe_ratio <- function(num, den) ifelse(is.na(den) | den == 0, NA_real_, num / den)
+
+rcm_cm_dashboard_df <- rcm_cm_dashboard_df |>
+  mutate(
+    `Achievement1 Number` = safe_ratio(`Visited Number`,            `Yesterday_To Be Visited Number`),
+    `Achievement1 Amount` = safe_ratio(`Visited Amount`,            `Yesterday_To Be Visited Amount`),
+    `Achievement2 Number` = safe_ratio(`Pending Declared Number`,   `Yesterday_Pending To Be Declared Number`),
+    `Achievement2 Amount` = safe_ratio(`Pending Declared Amount`,   `Yesterday_Pending To Be Declared Amount`),
+    `Achievement3 Number` = safe_ratio(`Decision Finalized Number`, `Yesterday_Decision To Be Made Number`),
+    `Achievement3 Amount` = safe_ratio(`Decision Finalized Amount`, `Yesterday_Decision To Be Made Amount`)
+  )
+
+#-- Spanner definitions in the requested column order. `role` tags which of the three
+#colour bands a spanner belongs to -- colour is now assigned BY ROLE (what the pair
+#represents), reused across all three stages, matching the reference workbook:
+#   role "planned"     -> green  (Yesterday_* "to-be" columns: To Be Visited / Pending
+#                          To Be Declared / Decision To Be Made)
+#   role "actual"      -> orange (what actually happened: Visited / Pending Declared /
+#                          Decision Finalized)
+#   role "achievement" -> blue   (the actual-vs-planned % columns)
+yday_cm_spanner_defs <- list(
+  list(label = "To Be Visited",          id = "tbv_yday",   columns = c("Yesterday_To Be Visited Number", "Yesterday_To Be Visited Amount"),         pct = FALSE, role = "planned"),
+  list(label = "Visited",                id = "vis_yday",   columns = c("Visited Number", "Visited Amount"),                                          pct = FALSE, role = "actual"),
+  list(label = "Achievement",            id = "achv1_yday", columns = c("Achievement1 Number", "Achievement1 Amount"),                                 pct = TRUE,  role = "achievement"),
+  list(label = "Pending To Be Declared", id = "ptbd_yday",  columns = c("Yesterday_Pending To Be Declared Number", "Yesterday_Pending To Be Declared Amount"), pct = FALSE, role = "planned"),
+  list(label = "Pending Declared",       id = "pdec_yday",  columns = c("Pending Declared Number", "Pending Declared Amount"),                          pct = FALSE, role = "actual"),
+  list(label = "Achievement",            id = "achv2_yday", columns = c("Achievement2 Number", "Achievement2 Amount"),                                 pct = TRUE,  role = "achievement"),
+  list(label = "Decision To Be Made",    id = "dtbm_yday",  columns = c("Yesterday_Decision To Be Made Number", "Yesterday_Decision To Be Made Amount"), pct = FALSE, role = "planned"),
+  list(label = "Decision Finalized",     id = "dfin_yday",  columns = c("Decision Finalized Number", "Decision Finalized Amount"),                      pct = FALSE, role = "actual"),
+  list(label = "Achievement",            id = "achv3_yday", columns = c("Achievement3 Number", "Achievement3 Amount"),                                 pct = TRUE,  role = "achievement")
+)
+
+#-- Body-cell colour per role (light bands, matched to the reference workbook: green =
+#planned, orange = actual, blue = achievement %). RCM/CM stub columns, Sub-total rows,
+#and the header/title/spanner rows use their own accent colours -- set below.
+yday_role_colors     <- c(planned = "#E2F0D9", actual = "#FBE5D6", achievement = "#DAE3F3")
+yday_stub_color      <- "#D7DFDF"   # RCM/CM stub columns (all data rows) + Sub-total row band
+yday_header_color    <- "#E84A45"   # Title row + spanner header row + column-label row
+yday_total_color     <- "#E84A45"   # Grand Total row (bold, same accent as header)
+
+```
+
+**Today's Projection**
+
+```{r}
+
+#-- UPDATED: header_color changed to "#E84A45" (also used for the Grand Total row,
+#see the tab_style block inside build_projection_gt for the Grand Total row).
+today_projection_gt <- build_projection_gt(
+  dashboard_gt_df, today_spanner_defs,
+  top_label = "Today's Projection", top_id = "today_group",
+  header_color = "#E84A45", rcm_color = "#D9D9D9",
+  table_width = pct(60)
+)
+
+today_projection_gt
+
+```
+
+<br><br>
+
+**Yesterday's Projection**
+
+```{r}
+
+#Builds the RCM/CM-wise "Yesterday's Projection" gt table.
+#Colour scheme (matches the reference workbook):
+#  - Title/spanner/column-label rows       -> yday_header_color (#E84A45), white bold text
+#  - RCM/CM stub columns (every data row)  -> yday_stub_color   (#D7DFDF), black bold text
+#  - Metric body cells, by role            -> yday_role_colors  (green/orange/blue), black bold text
+#  - Sub-total rows (entire row)           -> yday_stub_color   (#D7DFDF), black bold text
+#  - Grand Total row (entire row, last)    -> yday_total_color  (#E84A45), white bold text
+#"Total" is written into RCM_Display only (it becomes the row-group label); CM_Display is
+#left blank for that row so the word "Total" is not rendered twice on the same line.
+
+build_cm_projection_gt <- function(df, spanner_defs, role_colors, stub_color, header_color, total_color, table_width) {
+
+  metric_cols_tbl <- unlist(lapply(spanner_defs, `[[`, "columns"), use.names = FALSE)
+  pct_cols_tbl    <- unlist(lapply(spanner_defs, function(s) if (s$pct) s$columns else NULL))
+  cnt_cols_tbl    <- setdiff(metric_cols_tbl, pct_cols_tbl)
+  number_cnt_cols <- cnt_cols_tbl[grepl("Number$", cnt_cols_tbl)]
+  amount_cnt_cols <- cnt_cols_tbl[grepl("Amount$", cnt_cols_tbl)]
+
+  label_list <- setNames(as.list(rep(c("Number", "Amount(Mln)"), length(metric_cols_tbl) / 2)), metric_cols_tbl)
+  #-- merge CM_Display's label into the same list rather than passing it as a separate
+  #named argument alongside .list -- gt's cols_label() does not reliably combine a named
+  #dot-argument with .list in the same call, which was causing the header to fall back
+  #to the raw column name ("CM_Display") instead of the intended label ("CM").
+  label_list <- c(list(CM_Display = "CM"), label_list)
+
+  rcm_levels <- unique(df$RCM_Display[df$Row_Type != "Total"])
+
+  gt_tbl <- df |>
+    select(RCM_Display, CM_Display, all_of(metric_cols_tbl)) |>
+    gt(groupname_col = "RCM_Display") |>
+    tab_options(row_group.as_column = TRUE) |>
+    row_group_order(groups = rcm_levels) |>
+    tab_stubhead(label = "RCM") |>
+    opt_table_font(font = "IDLC") |>
+    tab_options(
+      table.width = table_width,
+      data_row.padding = px(3),
+      table.font.size = px(13),
+      row_group.font.weight = "bold",
+      table.border.top.style = "solid", table.border.top.width = px(2),
+      table.border.bottom.style = "solid", table.border.bottom.width = px(2)
+    ) |>
+    cols_width(CM_Display ~ px(120)) |>
+    fmt_number(columns = all_of(number_cnt_cols), decimals = 0) |>
+    fmt_number(columns = all_of(amount_cnt_cols), decimals = 2) |>
+    fmt_percent(columns = all_of(pct_cols_tbl), decimals = 1) |>
+    sub_missing(columns = all_of(pct_cols_tbl), missing_text = "-") |>
+    cols_label(.list = label_list)
+
+  for (s in spanner_defs) gt_tbl <- gt_tbl |> tab_spanner(label = s$label, id = s$id, columns = all_of(s$columns))
+
+  subtotal_rows <- which(df$Row_Type == "Subtotal")
+  total_rows    <- which(df$Row_Type == "Total")
+
+  #-- Base text style for every body cell (colour bands applied on top of this)
+  gt_tbl <- gt_tbl |>
+    tab_style(
+      style = cell_text(font = "IDLC", color = "black", align = "center", weight = "bold", v_align = "middle", size = px(13)),
+      locations = cells_body()
+    )
+
+  #-- Title/spanner/column-label header cells -> header_color, white bold text
+  #(stubhead "RCM" label, "CM" column label, and every stage/Achievement spanner +
+  #Number/Amount(Mln) column label all share the one header accent colour now.)
+  gt_tbl <- gt_tbl |>
+    tab_style(
+      style = list(cell_text(color = "white", weight = "bold", size = px(13)), cell_fill(color = header_color)),
+      locations = list(
+        cells_stubhead(),
+        cells_column_labels(columns = c(CM_Display, all_of(metric_cols_tbl))),
+        cells_column_spanners()
+      )
+    )
+
+  #-- RCM/CM stub columns (row-group label + CM_Display column) -> stub_color, black bold
+  #text, applied to every data row (Sub-total/Total rows are re-styled below).
+  gt_tbl <- gt_tbl |>
+    tab_style(
+      style = list(cell_fill(color = stub_color), cell_text(font = "IDLC", weight = "bold", color = "black", v_align = "middle", size = px(13))),
+      locations = cells_row_groups()
+    ) |>
+    tab_style(
+      style = list(cell_fill(color = stub_color), cell_text(font = "IDLC", weight = "bold", color = "black", size = px(13))),
+      locations = cells_body(columns = CM_Display)
+    )
+
+  #-- Metric body cells, coloured by role (green = planned, orange = actual, blue = achievement)
+  for (s in spanner_defs) {
+    band_color <- role_colors[[s$role]]
+
+    gt_tbl <- gt_tbl |>
+      tab_style(
+        style = list(cell_fill(color = band_color), cell_text(color = "black", weight = "bold", size = px(13))),
+        locations = cells_body(columns = all_of(s$columns))
+      )
+  }
+
+  #-- Sub-total rows: entire row (CM column + every metric column) -> stub_color, black
+  #bold text, so the row reads as one flat band rather than the green/orange/blue mix
+  #from the per-role styling above.
+  gt_tbl <- gt_tbl |>
+    tab_style(
+      style = list(cell_fill(color = stub_color), cell_text(color = "black", weight = "bold", size = px(13))),
+      locations = cells_body(columns = c(CM_Display, all_of(metric_cols_tbl)), rows = subtotal_rows)
+    )
+
+  #-- Grand Total row (last row): entire row, including its RCM row-group cell -> total_color,
+  #bold WHITE text.
+  gt_tbl <- gt_tbl |>
+    tab_style(
+      style = list(cell_fill(color = total_color), cell_text(color = "white", weight = "bold", size = px(13))),
+      locations = cells_body(columns = c(CM_Display, all_of(metric_cols_tbl)), rows = total_rows)
+    ) |>
+    #-- the grand "Total" row is its own single-row group (RCM_Display == "Total"), so
+    #its RCM group-column cell can be targeted directly by group name; per-RCM Sub-total
+    #rows share their group with sibling CM rows and so keep the group column's normal
+    #stub_color, since gt's cells_row_groups() only targets by group name, not by row.
+    tab_style(
+      style = list(cell_fill(color = total_color), cell_text(color = "white", weight = "bold", size = px(13))),
+      locations = cells_row_groups(groups = "Total")
+    ) |>
+    tab_style(
+      style = cell_borders(sides = c("top", "bottom", "left", "right"), color = "gray", weight = px(1)),
+      locations = list(cells_body(), cells_stub(), cells_row_groups())
+    ) |>
+    tab_style(
+      style = cell_borders(sides = c("top", "bottom", "left", "right"), color = "black", weight = px(1.5)),
+      locations = list(cells_column_labels(), cells_stubhead(), cells_column_spanners())
+    )
+
+  gt_tbl
+}
+
+yesterday_projection_gt <- build_cm_projection_gt(
+  rcm_cm_dashboard_df, yday_cm_spanner_defs,
+  role_colors = yday_role_colors, stub_color = yday_stub_color,
+  header_color = yday_header_color, total_color = yday_total_color, table_width = pct(95)
+)
+
+yesterday_projection_gt
+
+```
+
+<br>
+* Amounts are in Million BDT
+<br>
+* All the information demonstrated in the above table are as of last EOD
+<br>
+</br>
+This is a system generated email.
+
+```{r}
+
+#Excel workbook -- Dashboard (RCM-wise, with merged RCM column and Sub-total/Total rows)
+#+ lead-level detail sheets, openxlsx2 style
+#NOTE: the Excel Dashboard sheet is unchanged (still RCM/Branch-wise) -- only the RMD
+#output's "Yesterday's Projection" table above was switched to RCM/CM-wise with
+#Achievement columns, per requirements. yesterday_record (used to read back "planned"
+#figures for tomorrow's run) still parses this same RCM/Branch layout, so it is left as-is.
+
+if (!dir.exists(output_dir)) dir.create(output_dir, recursive = TRUE)
+
+#-- Helper: add a detail sheet; if the data frame has no rows, write just the column headers
+add_detail_sheet <- function(wb, sheet, df) {
+  wb$add_worksheet(sheet)
+  if (nrow(df) > 0) {
+    wb$add_data(sheet = sheet, x = df)
+  } else {
+    wb$add_data(sheet = sheet, x = as.data.frame(t(names(df))), col_names = FALSE)
+  }
+  invisible(wb)
+}
+
+wb <- wb_workbook()
+
+wb$add_worksheet("Dashboard", grid_lines = FALSE, zoom = 90)
+
+#-- Header: RCM | Branch | Today's Projection (3 spanners x 2 cols) | Yesterday's Projection (6 spanners x 2 cols)
+wb$add_data(sheet = "Dashboard", x = "RCM",    start_row = 1, start_col = 1, col_names = FALSE)
+wb$add_data(sheet = "Dashboard", x = "Branch", start_row = 1, start_col = 2, col_names = FALSE)
+wb$add_data(sheet = "Dashboard", x = "Today's Projection",     start_row = 1, start_col = 3, col_names = FALSE)
+wb$add_data(sheet = "Dashboard", x = "Yesterday's Projection", start_row = 1, start_col = 9, col_names = FALSE)
+wb$merge_cells(sheet = "Dashboard", dims = "A1:A3")
+wb$merge_cells(sheet = "Dashboard", dims = "B1:B3")
+wb$merge_cells(sheet = "Dashboard", dims = "C1:H1")
+wb$merge_cells(sheet = "Dashboard", dims = "I1:T1")
+
+spanner_labels     <- c("To Be Visited", "Pending To Be Declared", "Decision To Be Made",
+                         "To Be Visited", "Visited", "Pending To Be Declared", "Pending Declared",
+                         "Decision To Be Made", "Decision Finalized")
+spanner_start_cols <- seq(3, 19, by = 2)
+
+for (i in seq_along(spanner_labels)) {
+  scol <- spanner_start_cols[i]
+  wb$add_data(sheet = "Dashboard", x = spanner_labels[i], start_row = 2, start_col = scol, col_names = FALSE)
+  wb$merge_cells(sheet = "Dashboard", dims = wb_dims(rows = 2, cols = scol:(scol + 1)))
+}
+
+wb$add_data(sheet = "Dashboard", x = as.data.frame(t(rep(c("Number", "Amount(Mln)"), 9))),
+            start_row = 3, start_col = 3, col_names = FALSE)
+
+#-- Body
+dashboard_body <- rcm_dashboard_df |> select(RCM_Display, Branch, all_of(metric_cols))
+dashboard_body$RCM_Display[is.na(dashboard_body$RCM_Display)] <- ""
+
+first_data_row <- 4
+wb$add_data(sheet = "Dashboard", x = dashboard_body, start_row = first_data_row, col_names = FALSE)
+
+last_row <- first_data_row + nrow(dashboard_body) - 1
+
+#-- Merge the RCM column down each RCM's branch rows (Sub-total / Total rows excluded)
+branch_idx <- which(rcm_dashboard_df$Row_Type == "Branch")
+run_group  <- rle(rcm_dashboard_df$Group[branch_idx])
+pos <- 1
+for (k in seq_along(run_group$lengths)) {
+  len <- run_group$lengths[k]
+  excel_rows <- branch_idx[pos:(pos + len - 1)] + first_data_row - 1
+  if (len > 1) {
+    wb$merge_cells(sheet = "Dashboard", dims = wb_dims(rows = min(excel_rows):max(excel_rows), cols = 1))
+  }
+  pos <- pos + len
+}
+
+#-- Colours: RCM / Branch / Today's Projection header block = #ee3e11, Yesterday's = #1ecbe1
+wb$add_fill(sheet = "Dashboard", dims = wb_dims(rows = 1:3, cols = 1:8),  color = wb_color("#ee3e11"))
+wb$add_fill(sheet = "Dashboard", dims = wb_dims(rows = 1:3, cols = 9:20), color = wb_color("#1ecbe1"))
+wb$add_font(sheet = "Dashboard", dims = wb_dims(rows = 1:3, cols = 1:20), color = wb_color("#FFFFFF"),
+            bold = TRUE, name = "Cambria", size = 10)
+
+subtotal_excel_rows <- which(rcm_dashboard_df$Row_Type == "Subtotal") + first_data_row - 1
+total_excel_rows    <- which(rcm_dashboard_df$Row_Type == "Total")    + first_data_row - 1
+
+#wb_dims() only accepts contiguous row ranges, and Sub-total rows are scattered between
+#RCM groups, so each row is styled individually here rather than in one wb_dims() call.
+for (r in subtotal_excel_rows) {
+  wb$add_fill(sheet = "Dashboard", dims = wb_dims(rows = r, cols = 1:20), color = wb_color("#E0E0E0"))
+  wb$add_font(sheet = "Dashboard", dims = wb_dims(rows = r, cols = 1:20), bold = TRUE, name = "Cambria", size = 10)
+}
+
+for (r in total_excel_rows) {
+  wb$add_fill(sheet = "Dashboard", dims = wb_dims(rows = r, cols = 1:20), color = wb_color("#CCCCCC"))
+  wb$add_font(sheet = "Dashboard", dims = wb_dims(rows = r, cols = 1:20), bold = TRUE, name = "Cambria", size = 10)
+}
+
+wb$add_border(sheet = "Dashboard", dims = wb_dims(rows = 1:last_row, cols = 1:20), bottom_border = "thin",
+              left_border = "thin",
+              right_border = "thin",
+              top_border = "thin",
+              inner_hgrid = "thin",
+              inner_vgrid = "thin")
+wb$add_font(sheet = "Dashboard", dims = wb_dims(rows = 4:last_row, cols = 1:20), name = "Cambria", size = 10)
+wb$set_col_widths(sheet = "Dashboard", cols = 1:20, widths = "auto")
+
+#-- Detail sheets (empty data frames get a header row only)
+add_detail_sheet(wb, "To Be Visited",                  to_be_visited_detail)
+add_detail_sheet(wb, "Pending To Be Declared",         pending_to_be_declared_detail)
+add_detail_sheet(wb, "Decision To Be Made",            decision_to_be_made_detail)
+add_detail_sheet(wb, "Delayed Processing",             delayed_processing_detail)
+add_detail_sheet(wb, "Pending Declared Not Collected", pending_declared_not_collected_detail)
+add_detail_sheet(wb, "Sanctioned",                     sanctioned_detail)
+add_detail_sheet(wb, "Rejected",                       rejected_detail)
+add_detail_sheet(wb, "Insufficient Docs & Del. Nego.", insufficient_detail)
+add_detail_sheet(wb, "Waiting for Prospect Creation",  waiting_for_lead_creation_detail)
+
+wb$save(output_file, overwrite = TRUE)
+
+dbDisconnect(con)
+
+message(paste0("Saved workbook to ", output_file))
+
+```
